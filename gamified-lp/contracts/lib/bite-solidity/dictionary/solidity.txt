@@ -1,0 +1,16 @@
+abicoder
+addmod
+blockhash
+chainid
+delegatecall
+gasleft
+inheritdoc
+mload
+mstore
+mulmod
+natspec
+prevrandao
+reinitializer
+selfdestruct
+staticcall
+struct

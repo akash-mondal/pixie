@@ -1,0 +1,20 @@
+{
+    "$schema": "https://raw.githubusercontent.com/streetsidesoftware/cspell/main/cspell.schema.json",
+    "version": "0.2",
+    "dictionaryDefinitions": [
+        { "name": "skale-terms", "path": "./dictionary/skale-terms.txt"},
+        { "name": "libraries", "path": "./dictionary/libraries.txt"},
+        { "name": "domain-terms", "path": "./dictionary/domain-terms.txt"},
+        { "name": "names", "path": "./dictionary/names.txt"},
+        { "name": "solidity", "path": "./dictionary/solidity.txt"},
+        { "name": "python", "path": "./dictionary/python.txt"}
+    ],
+    "dictionaries": ["domain-terms", "libraries", "names", "skale-terms", "solidity", "python"],
+    "ignorePaths": [
+        ".solhint.json",
+        "artifacts",
+        "cache",
+        "node_modules",
+        "venv",
+    ]
+}

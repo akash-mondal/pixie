@@ -1,0 +1,202 @@
+{
+  "protocol": "Pixie Sealed-Bid LP Vault",
+  "chain": "BITE V2 Sandbox 2",
+  "chainId": 103698795,
+  "contract": "0xEe40a91495CC60eF465C838Cc35de2d7C0Beba29",
+  "trustModel": {
+    "whatIsPrivate": "LP strategies (tickLower, tickUpper, lockDays) per agent",
+    "whenDoesItUnlock": "When 5 depositors reached OR deadline passes",
+    "whoCanTrigger": "Permissionless — any address",
+    "whatIfItFails": "Emergency withdrawal after grace period"
+  },
+  "lifecycle": [
+    {
+      "phase": "createPool",
+      "tx": "0x306c81a10a6a27dcff4cd7cb0de49d881cd61590beaf8f7c43e5611dde8f6286",
+      "poolId": 3
+    },
+    {
+      "phase": "deposit",
+      "agent": "Alpha",
+      "amount": "0.2",
+      "encrypted": true,
+      "tx": "0x0c2400667405e15b864663052fc9d55456d2bb47797ec9e7ca263215e08d050a",
+      "index": 0
+    },
+    {
+      "phase": "deposit",
+      "agent": "Beta",
+      "amount": "0.2",
+      "encrypted": true,
+      "tx": "0xcb020fe93c612c08ff50903a110aa4435fa1241144a7a742026d701fa40e9934",
+      "index": 1
+    },
+    {
+      "phase": "deposit",
+      "agent": "Gamma",
+      "amount": "0.2",
+      "encrypted": true,
+      "tx": "0x9dcc6509d93645ae50ec47964e65ea87f6f120e46e41363745e46c6b0af01762",
+      "index": 2
+    },
+    {
+      "phase": "deposit",
+      "agent": "Delta",
+      "amount": "0.2",
+      "encrypted": true,
+      "tx": "0x4584edfa13e1c9fe0c906054362e3ad4f19ba6d2e7ddfc0fa716240920bc8625",
+      "index": 3
+    },
+    {
+      "phase": "deposit",
+      "agent": "Epsilon",
+      "amount": "0.2",
+      "encrypted": true,
+      "tx": "0xa669531b1bd3b1b99a1be2c5753ddd01939c83bb299297ad9818c90f3d12e147",
+      "index": 4
+    },
+    {
+      "phase": "conditionMet",
+      "type": "depositorThreshold",
+      "count": 5
+    },
+    {
+      "phase": "batchCTX",
+      "tx": "0x3f3b6e261fd6293263b94f953a852a31781c855dc906fccec03f1403276bd03d",
+      "encryptedCount": 5
+    },
+    {
+      "phase": "strategiesRevealed",
+      "tx": "0x3f3b6e261fd6293263b94f953a852a31781c855dc906fccec03f1403276bd03d",
+      "strategies": [
+        {
+          "agent": "Alpha",
+          "tickLower": 199620,
+          "tickUpper": 201060,
+          "lockDays": 30
+        },
+        {
+          "agent": "Beta",
+          "tickLower": 180300,
+          "tickUpper": 220380,
+          "lockDays": 7
+        },
+        {
+          "agent": "Gamma",
+          "tickLower": 180300,
+          "tickUpper": 220380,
+          "lockDays": 180
+        },
+        {
+          "agent": "Delta",
+          "tickLower": 200280,
+          "tickUpper": 200400,
+          "lockDays": 7
+        },
+        {
+          "agent": "Epsilon",
+          "tickLower": 198360,
+          "tickUpper": 202320,
+          "lockDays": 30
+        }
+      ]
+    },
+    {
+      "phase": "claim",
+      "agent": "Alpha",
+      "reward": "0.11811",
+      "tx": "0xa5b0a092e65cb3723c00bb39c6de8a3c692dd2bb9100164a4ea9b521411b40d8"
+    },
+    {
+      "phase": "claim",
+      "agent": "Beta",
+      "reward": "0.027559",
+      "tx": "0x25f8cf4d71590182042b0ed174f62da74b81a41677e7cfa66c4c11db8544b21e"
+    },
+    {
+      "phase": "claim",
+      "agent": "Gamma",
+      "reward": "0.708661",
+      "tx": "0xb186991fe2de1c223e27ce03e725cfe04383dd84b35ff5f5a5af9a51fd38ae2f"
+    },
+    {
+      "phase": "claim",
+      "agent": "Delta",
+      "reward": "0.027559",
+      "tx": "0x9dd6c0f47105bd999f55b0c11936bdc8d0dca0c532141aec36535fd1b9fabccb"
+    },
+    {
+      "phase": "claim",
+      "agent": "Epsilon",
+      "reward": "0.11811",
+      "tx": "0x5969dcb67f3860b95ee18285d43462d07b57c544c73fe07b4a97f47999236b41"
+    }
+  ],
+  "agents": [
+    {
+      "name": "Alpha",
+      "description": "The Strategist",
+      "aiQuality": "HIGH",
+      "tickLower": 199620,
+      "tickUpper": 201060,
+      "lockDays": 30,
+      "efficiency": 1232,
+      "ilRisk": "medium",
+      "reasoning": "With a fee APR of 45.6% and strong 24h volume, concentrating liquidity near the current price captures high fees. A 1440‑tick range (≈0.72% price band) balances the ~1,500× efficiency of tight ranges with moderate IL risk. The range is centered on the current tick (200340) and both bounds (199620, 201060) align to the 60‑tick spacing. A 30‑day lock offers a decent commitment reward while preserving flexibility for market moves."
+    },
+    {
+      "name": "Beta",
+      "description": "The Conservative",
+      "aiQuality": "LOW",
+      "tickLower": 180300,
+      "tickUpper": 220380,
+      "lockDays": 7,
+      "efficiency": 44,
+      "ilRisk": "very low",
+      "reasoning": "A 40,000‑tick wide range (≈20,000 ticks each side of the current price) gives about 44x fee efficiency while keeping impermanent loss risk very low. Using the pool's tick spacing of 60, the nearest valid boundaries are 180,300 and 220,360. A short 7‑day lock limits exposure to potential market shifts and allows you to reassess quickly, aligning with a capital‑preservation focus."
+    },
+    {
+      "name": "Gamma",
+      "description": "The Lazy Whale",
+      "aiQuality": "NONE",
+      "tickLower": 180300,
+      "tickUpper": 220380,
+      "lockDays": 180,
+      "efficiency": 44,
+      "ilRisk": "very low",
+      "reasoning": "Maximum lock, minimum effort. Ultra-wide range — set and forget."
+    },
+    {
+      "name": "Delta",
+      "description": "The Gambler",
+      "aiQuality": "NONE",
+      "tickLower": 200280,
+      "tickUpper": 200400,
+      "lockDays": 7,
+      "efficiency": 14788,
+      "ilRisk": "extreme",
+      "reasoning": "All-in on current price zone. Ultra-tight range, 7d lock — max risk."
+    },
+    {
+      "name": "Epsilon",
+      "description": "The Balanced",
+      "aiQuality": "MEDIUM",
+      "tickLower": 198360,
+      "tickUpper": 202320,
+      "lockDays": 30,
+      "efficiency": 448,
+      "ilRisk": "low",
+      "reasoning": "A moderate 4,000‑tick range (rounded to the nearest multiple of the 60‑tick spacing → 3,960 ticks) balances capital efficiency (~400×) with low impermanent loss risk. Positioning symmetrically around the current tick (200,340) captures price movement while limiting exposure. A 30‑day lock offers reasonable reward capture without over‑committing liquidity."
+    }
+  ],
+  "summary": {
+    "biteEncryptions": 6,
+    "onChainEvents": 13,
+    "totalUSDC": "2.00",
+    "winner": "Gamma",
+    "winnerLockDays": 180,
+    "llmTokens": 6240,
+    "durationMs": 120216,
+    "resolved": true
+  }
+}

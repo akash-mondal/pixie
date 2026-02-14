@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# Environment variables
+.env
+.env.*
+.env.local
+.env.*.local
+
+# Build artifacts
+*.tsbuildinfo
+next-env.d.ts
+
+# Foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+gamified-lp/contracts/out/
+gamified-lp/contracts/cache/
+gamified-lp/contracts/broadcast/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Keys & certificates
+*.pem
+*.key
+
+# Vercel
+.vercel
+
+# Misc
+*.tgz
+.turbo

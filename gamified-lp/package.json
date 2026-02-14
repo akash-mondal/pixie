@@ -1,0 +1,26 @@
+{
+  "name": "pixie-gamified-lp",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "demo": "npx tsx demo.ts",
+    "server": "npx tsx server/index.ts",
+    "build": "cd contracts && forge build"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.9",
+    "@skalenetwork/bite": "^0.7.1",
+    "@x402/core": "^2.3.1",
+    "@x402/evm": "^2.3.1",
+    "@x402/hono": "^2.3.0",
+    "dotenv": "^16.4.0",
+    "ethers": "^6.13.0",
+    "hono": "^4.11.9",
+    "openai": "^4.77.0",
+    "tslog": "^4.10.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
