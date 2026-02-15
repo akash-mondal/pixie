@@ -116,6 +116,44 @@ export function ActivityFeed({ events, lobbyAgents, userAgentId }: ActivityFeedP
         const isMarketMover = isSystem && (evt.data as any)?.marketMover;
         const isSealedOrder = evt.type === 'sealed-order';
 
+        // Sealed conviction orders get a special multi-line card
+        if (isSealedOrder) {
+          return (
+            <motion.div
+              key={`${evt.timestamp}-${i}`}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3, ease: 'easeOut' }}
+              className="bg-yellow-500/[0.06] border border-yellow-500/20 border-l-2 border-l-yellow-500/50 rounded-lg p-3 my-1.5 -mx-1"
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <AgentDot color={color} size={6} />
+                <span className={`text-[12px] font-medium ${isOwned ? 'text-cyan-400' : 'text-[#ccc]'}`}>
+                  {getAgentName(evt.agentId, evt.agentName)}
+                </span>
+                <span className="text-[10px] font-mono text-yellow-400 bg-yellow-500/15 px-2 py-0.5 rounded tracking-wider">
+                  SEALED CONVICTION ORDER
+                </span>
+                <span className="ml-auto text-[11px] text-[#444] tabular-nums">
+                  {relativeTime(evt.timestamp)}
+                </span>
+              </div>
+              <div className="text-[12px] font-mono text-[#ccc] leading-relaxed mb-2">
+                {evt.message}
+              </div>
+              <div className="flex items-center gap-3 flex-wrap">
+                {(evt.data as any)?.encrypted && (
+                  <span className="text-[10px] font-mono text-yellow-500/30">
+                    {(evt.data as any).encrypted}
+                  </span>
+                )}
+                {swapTxHash && <ExplorerLink hash={swapTxHash} label="sealed tx" />}
+                <span className="text-[10px] font-mono text-yellow-500/40">executes at reveal</span>
+              </div>
+            </motion.div>
+          );
+        }
+
         return (
           <motion.div
             key={`${evt.timestamp}-${i}`}
@@ -123,8 +161,7 @@ export function ActivityFeed({ events, lobbyAgents, userAgentId }: ActivityFeedP
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.2, ease: 'easeOut' }}
             className={`flex items-start gap-2.5 py-1.5 text-[12px] font-mono leading-tight ${
-              isMarketMover ? 'bg-yellow-500/[0.03] -mx-3 px-3 rounded' :
-              isSealedOrder ? 'bg-yellow-500/[0.04] -mx-3 px-3 rounded border-l-2 border-l-yellow-500/30' : ''
+              isMarketMover ? 'bg-yellow-500/[0.03] -mx-3 px-3 rounded' : ''
             }`}
           >
             {/* Timestamp */}
@@ -149,7 +186,6 @@ export function ActivityFeed({ events, lobbyAgents, userAgentId }: ActivityFeedP
               evt.type === 'executed' ? 'text-green-400/70' :
               evt.type === 'error' ? 'text-red-400/70' :
               evt.type === 'x402-purchase' ? 'text-emerald-400/70' :
-              evt.type === 'sealed-order' ? 'text-yellow-400' :
               evt.type === 'depositing' ? 'text-cyan-400/70' :
               'text-[#555]'
             }`}>

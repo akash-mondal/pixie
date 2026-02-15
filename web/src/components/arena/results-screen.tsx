@@ -101,6 +101,35 @@ export function ResultsScreen({
 
   const modeConfig = session?.mode ? GAME_MODES[session.mode as keyof typeof GAME_MODES] : null;
 
+  // BITE Encryption Registry — every encryption op across all agents
+  const biteRegistry = useMemo(() => {
+    const ops: { type: string; agent: string; ciphertext: string; txHash?: string; description: string }[] = [];
+    for (const entry of entries) {
+      if (entry.encryptedStrategy) {
+        ops.push({ type: 'strategy', agent: entry.agentName, ciphertext: entry.encryptedStrategy, txHash: entry.joinTxHash, description: 'Agent strategy (config, risk params, pairs)' });
+      }
+      for (const trade of (entry.trades || [])) {
+        if (trade.encrypted) {
+          ops.push({ type: 'swap', agent: entry.agentName, ciphertext: trade.encrypted, txHash: trade.recordTxHash, description: `${trade.direction?.toUpperCase()} ${trade.pair} swap calldata` });
+        }
+        if (trade.encryptedPnL) {
+          ops.push({ type: 'pnl', agent: entry.agentName, ciphertext: trade.encryptedPnL, txHash: trade.recordTxHash, description: `P&L for ${trade.direction?.toUpperCase()} ${trade.pair}` });
+        }
+        if (trade.encryptedReasoning) {
+          ops.push({ type: 'reasoning', agent: entry.agentName, ciphertext: trade.encryptedReasoning, txHash: trade.recordTxHash, description: `Reasoning for ${trade.direction?.toUpperCase()} ${trade.pair}` });
+        }
+      }
+      if (entry.sealedOrders && Array.isArray(entry.sealedOrders)) {
+        for (const order of entry.sealedOrders) {
+          if (order.encrypted && typeof order.encrypted === 'string') {
+            ops.push({ type: 'sealed-order', agent: entry.agentName, ciphertext: order.encrypted, txHash: order.submitTxHash, description: `Sealed ${order.direction?.toUpperCase()} ${order.pair} ($${order.amountIn?.toFixed(2)})` });
+          }
+        }
+      }
+    }
+    return ops;
+  }, [entries]);
+
   // Find representative tx hashes for tech pillars
   const firstX402Tx = allX402Events.find((e: any) => e.txHash)?.txHash;
   const firstRealSwapTx = useMemo(() => {
@@ -488,7 +517,7 @@ export function ResultsScreen({
                       )}
 
                       {/* 4b.5: Sealed Conviction Orders */}
-                      {entry.sealedOrders && entry.sealedOrders.length > 0 && !entry.sealedOrders[0]?.encrypted && (
+                      {entry.sealedOrders && entry.sealedOrders.length > 0 && typeof entry.sealedOrders[0]?.pair === 'string' && (
                         <div>
                           <div className="font-mono text-[13px] text-[#555] tracking-[0.2em] uppercase mb-4">
                             SEALED CONVICTION ORDERS ({entry.sealedOrders.length})
@@ -512,8 +541,8 @@ export function ResultsScreen({
                                 {/* Encrypted → Decrypted flow */}
                                 <div className="mb-3">
                                   <div className="text-[11px] font-mono text-yellow-500/50 mb-1">Encrypted at submission:</div>
-                                  <div className="text-[12px] font-mono text-yellow-500/30 break-all leading-relaxed">
-                                    {(order.encrypted || '').slice(0, 60)}...
+                                  <div className="text-[11px] font-mono text-yellow-500/30 break-all leading-relaxed">
+                                    {order.encrypted || ''}
                                   </div>
                                   <div className="text-[20px] text-[#333] text-center my-1">{'\u2193'}</div>
                                   <div className="text-[11px] font-mono text-cyan-400/50 mb-1">Decrypted & executed in onDecrypt():</div>
@@ -528,9 +557,16 @@ export function ResultsScreen({
                                   </div>
                                 )}
 
-                                <div className="flex items-center gap-3">
-                                  <ExplorerLink hash={order.submitTxHash} label="sealed tx" />
-                                  <span className="text-[11px] font-mono text-yellow-500/40">executed inside CTX callback</span>
+                                <div className="flex flex-col gap-2">
+                                  {order.submitTxHash && (
+                                    <div className="text-[11px] font-mono text-[#666] break-all">
+                                      tx: {order.submitTxHash}
+                                    </div>
+                                  )}
+                                  <div className="flex items-center gap-3">
+                                    <ExplorerLink hash={order.submitTxHash} label="view on explorer" />
+                                    <span className="text-[11px] font-mono text-yellow-500/40">executed inside CTX callback</span>
+                                  </div>
                                 </div>
                               </div>
                             ))}
@@ -685,6 +721,62 @@ export function ResultsScreen({
                 )}
               </div>
             </div>
+          </div>
+        </motion.div>
+      )}
+
+      {/* ═══ SECTION 5.5: BITE ENCRYPTION REGISTRY ═══ */}
+      {biteRegistry.length > 0 && (
+        <motion.div {...sectionAnim(0.75)} className="rounded-xl border border-yellow-500/15 bg-yellow-500/[0.02] p-6 mb-8">
+          <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center gap-3">
+              <LockIcon size={20} />
+              <div className="font-pixel text-[24px] text-yellow-400 tracking-[0.1em]">BITE ENCRYPTION REGISTRY</div>
+            </div>
+            <span className="text-[13px] font-mono text-yellow-500/50">{biteRegistry.length} operations</span>
+          </div>
+          <div className="text-[12px] font-mono text-[#666] mb-5">
+            Every BITE threshold encryption operation — full ciphertexts with block explorer links
+          </div>
+          <div className="max-h-[600px] overflow-y-auto space-y-3 pr-1">
+            {biteRegistry.map((op, i) => {
+              const badgeMap: Record<string, string> = {
+                strategy: 'text-yellow-400 bg-yellow-500/10',
+                swap: 'text-cyan-400 bg-cyan-500/10',
+                pnl: 'text-green-400 bg-green-500/10',
+                reasoning: 'text-violet-400 bg-violet-500/10',
+                'sealed-order': 'text-yellow-400 bg-yellow-500/10',
+              };
+              return (
+                <div key={i} className={`rounded-lg border p-4 ${
+                  op.type === 'sealed-order'
+                    ? 'border-yellow-500/20 bg-yellow-500/[0.03]'
+                    : 'border-[#1a1a1a] bg-[#0a0a0a]'
+                }`}>
+                  <div className="flex items-center gap-2.5 mb-2">
+                    <span className={`text-[11px] font-mono px-2 py-0.5 rounded uppercase ${badgeMap[op.type] || 'text-[#888] bg-[#111]'}`}>
+                      {op.type === 'sealed-order' ? '\u25C6 sealed order' : op.type}
+                    </span>
+                    <span className="text-[13px] font-mono text-[#ccc]">{op.agent}</span>
+                    <span className="text-[12px] font-mono text-[#666]">{op.description}</span>
+                  </div>
+                  <div className="mb-2">
+                    <div className="text-[10px] font-mono text-[#555] mb-1">Ciphertext:</div>
+                    <div className="text-[11px] font-mono text-yellow-500/30 break-all leading-relaxed">
+                      {op.ciphertext}
+                    </div>
+                  </div>
+                  {op.txHash && (
+                    <div className="flex items-start gap-3">
+                      <ExplorerLink hash={op.txHash} label="view on explorer" />
+                      <span className="text-[11px] font-mono text-[#555] break-all">
+                        {op.txHash}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </motion.div>
       )}
