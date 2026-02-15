@@ -97,6 +97,20 @@ export async function encryptPnL(pnlBasisPoints: number): Promise<string> {
   return encryptMessage(encoded);
 }
 
+// --- Encrypt sealed order (tokenIn, tokenOut, amountIn → abi.encode → BITE) ---
+
+export async function encryptSealedOrder(params: {
+  tokenIn: Address;
+  tokenOut: Address;
+  amountIn: bigint;
+}): Promise<string> {
+  const encoded = encodeAbiParameters(
+    [{ type: 'address' }, { type: 'address' }, { type: 'uint256' }],
+    [params.tokenIn, params.tokenOut, params.amountIn],
+  );
+  return encryptMessage(encoded);
+}
+
 // --- Encrypt trade reasoning ---
 
 export async function encryptReasoning(reasoning: string): Promise<string> {

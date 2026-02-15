@@ -11,6 +11,7 @@ import { writeServerContract, waitForTx, ensureUsdcApproval, getServerAddress, g
 import { unwindToUsdc, getOnChainBalance } from './dex-swap';
 import { USDC_ADDRESS, WETH_ADDRESS, WBTC_ADDRESS, ALGEBRA_SWAP_ROUTER, SWAP_ROUTER_ABI } from './algebra';
 import { PIXIE_ARENA_ABI, ARENA_ADDRESS } from './arena';
+import { ARENA_V3_ADDRESS, PIXIE_ARENA_V3_ABI } from './arena-v3';
 import { generateOpponents } from './opponent-generator';
 import { processAllAgents } from './lobby-pipeline';
 import { getMemory, formatMemoryForPrompt, recordRound, addLesson, type ShortTermMemory } from './agent-memory';
@@ -19,11 +20,15 @@ import { type Address } from 'viem';
 
 // --- Create on-chain arena (server wallet is the platform creator) ---
 
-async function createOnChainArena(duration: number, maxAgents: number): Promise<{ onChainId: number; txHash: string }> {
+async function createOnChainArena(duration: number, maxAgents: number): Promise<{ onChainId: number; onChainIdV3: number; txHash: string }> {
+  let onChainId = 0;
+  let onChainIdV3 = -1;
+  let txHash: `0x${string}` | '' = '';
+
   try {
     await ensureUsdcApproval(ARENA_ADDRESS);
 
-    const txHash = await writeServerContract({
+    txHash = await writeServerContract({
       address: ARENA_ADDRESS,
       abi: PIXIE_ARENA_ABI,
       functionName: 'createArena',
@@ -35,14 +40,42 @@ async function createOnChainArena(duration: number, maxAgents: number): Promise<
 
     const { parseEvent } = await import('./server-wallet');
     const event = parseEvent(receipt, PIXIE_ARENA_ABI as any, 'ArenaCreated');
-    const onChainId = event ? Number(event.arenaId) : 0;
+    onChainId = event ? Number(event.arenaId) : 0;
 
-    console.log(`[lifecycle] Created on-chain arena #${onChainId} — tx: ${txHash.slice(0, 14)}...`);
-    return { onChainId, txHash };
+    console.log(`[lifecycle] Created on-chain arena #${onChainId} - tx: ${txHash.slice(0, 14)}...`);
   } catch (err: any) {
     console.error(`[lifecycle] On-chain createArena failed:`, err.message);
-    return { onChainId: 0, txHash: '' };
   }
+
+  // Also create V3 arena for sealed conviction orders
+  try {
+    console.log(`[lifecycle] V3: ensuring USDC approval to ${ARENA_V3_ADDRESS}...`);
+    await ensureUsdcApproval(ARENA_V3_ADDRESS);
+    console.log(`[lifecycle] V3: USDC approved, calling createArena...`);
+
+    const v3TxHash = await writeServerContract({
+      address: ARENA_V3_ADDRESS,
+      abi: PIXIE_ARENA_V3_ABI,
+      functionName: 'createArena',
+      args: [0n, BigInt(maxAgents), BigInt(duration), 10000n],
+      gas: 500000n,
+    });
+    console.log(`[lifecycle] V3: createArena tx sent: ${v3TxHash}`);
+
+    const v3Receipt = await waitForTx(v3TxHash);
+    console.log(`[lifecycle] V3: receipt status: ${v3Receipt.status}, logs: ${v3Receipt.logs?.length || 0}`);
+
+    const { parseEvent } = await import('./server-wallet');
+    const v3Event = parseEvent(v3Receipt, PIXIE_ARENA_V3_ABI as any, 'ArenaCreated');
+    onChainIdV3 = v3Event ? Number(v3Event.arenaId) : -1;
+
+    console.log(`[lifecycle] Created V3 arena #${onChainIdV3} for sealed orders - tx: ${v3TxHash.slice(0, 14)}...`);
+  } catch (err: any) {
+    console.error(`[lifecycle] V3 createArena failed:`, err.message);
+    console.error(`[lifecycle] V3 createArena error stack:`, err.stack?.slice(0, 300));
+  }
+
+  return { onChainId, onChainIdV3, txHash };
 }
 
 // --- Phase transitions ---
@@ -364,11 +397,82 @@ async function resolveArena(arena: StoredArena) {
     console.error('[lifecycle] finalizeArena failed:', err.message);
   }
 
+  // Finalize V3 arena for sealed conviction orders (CTX → onDecrypt → real swaps)
+  if (arena.onChainIdV3 >= 0 && arena.sealedOrderCount > 0) {
+    try {
+      const { parseEther } = await import('viem');
+      // Gas budget: base 2M + 12M per sealed order (each Algebra swap ~8M with plugins)
+      const sealedGas = 2000000n + BigInt(arena.sealedOrderCount) * 12000000n;
+
+      arenaStore.addEvent(arena.id, {
+        type: 'recording',
+        agentId: 'system',
+        agentName: 'PIXIE',
+        message: `finalizing ${arena.sealedOrderCount} sealed conviction orders via BITE CTX...`,
+        data: { sealedOrderCount: arena.sealedOrderCount },
+        timestamp: Date.now(),
+      });
+
+      const v3TxHash = await writeServerContract({
+        address: ARENA_V3_ADDRESS,
+        abi: PIXIE_ARENA_V3_ABI,
+        functionName: 'finalizeArena',
+        args: [BigInt(arena.onChainIdV3)],
+        value: parseEther('0.01'), // covers gas for CTX callback
+        gas: sealedGas + 1000000n,
+      });
+      const v3Receipt = await waitForTx(v3TxHash);
+
+      // Count SealedOrderExecuted events
+      const executedTopic = '0x' + Buffer.from('SealedOrderExecuted(uint256,uint256,uint256,address,address,uint256,uint256)').toString('hex').slice(0, 64);
+      let executedCount = 0;
+      for (const log of (v3Receipt as any).logs || []) {
+        if (log.address?.toLowerCase() === ARENA_V3_ADDRESS.toLowerCase()) {
+          executedCount++;
+        }
+      }
+
+      arenaStore.addEvent(arena.id, {
+        type: 'recording',
+        agentId: 'system',
+        agentName: 'PIXIE',
+        message: `BITE CTX executed: ${arena.sealedOrderCount} sealed orders decrypted and swapped on Algebra DEX`,
+        data: { v3TxHash, sealedOrderCount: arena.sealedOrderCount, executedCount },
+        timestamp: Date.now(),
+      });
+
+      console.log(`[lifecycle] V3 finalizeArena: ${arena.sealedOrderCount} sealed orders, tx: ${v3TxHash.slice(0, 14)}...`);
+    } catch (err: any) {
+      console.error('[lifecycle] V3 finalizeArena (sealed orders) failed:', err.message);
+    }
+  }
+
+  // Withdraw remaining deposits from V3 for each agent
+  if (arena.onChainIdV3 >= 0) {
+    const { writeAgentContract, waitForAgentTx } = await import('./agent-wallet');
+    for (const entry of arena.entries) {
+      try {
+        const withdrawHash = await writeAgentContract(entry.agentId, {
+          address: ARENA_V3_ADDRESS,
+          abi: PIXIE_ARENA_V3_ABI,
+          functionName: 'withdrawDeposit',
+          args: [BigInt(arena.onChainIdV3), BigInt(entry.entryIndex)],
+          gas: 500000n,
+        });
+        await waitForAgentTx(withdrawHash);
+      } catch (err: any) {
+        // Non-critical — deposit may be zero or already withdrawn
+        console.warn(`[lifecycle] V3 withdrawDeposit failed for ${entry.agentName}:`, err.message);
+      }
+    }
+  }
+
   // Unwind all agent positions (sell non-USDC -> USDC) + calculate real P&L
   for (const entry of arena.entries) {
     entry.revealed = true;
     const state = arena.agentStates.get(entry.agentId);
     entry.tradeCount = state?.trades.length || 0;
+    entry.sealedOrderCount = state?.sealedOrders.length || 0;
 
     try {
       // Unwind non-USDC tokens back to USDC
@@ -502,8 +606,8 @@ export async function startSession(
   // 1. Generate opponents
   const opponents = await generateOpponents(mode, modeConfig.maxOpponents);
 
-  // 2. Create on-chain arena
-  const { onChainId, txHash: arenaTxHash } = await createOnChainArena(modeConfig.tradingDuration, totalAgents).catch(() => ({ onChainId: 0, txHash: '' }));
+  // 2. Create on-chain arena (V1 + V3 for sealed orders)
+  const { onChainId, onChainIdV3, txHash: arenaTxHash } = await createOnChainArena(modeConfig.tradingDuration, totalAgents).catch(() => ({ onChainId: 0, onChainIdV3: -1, txHash: '' }));
 
   // 3. Build lobby agents list (user first, then opponents)
   const lobbyAgents: LobbyAgent[] = [];
@@ -544,6 +648,7 @@ export async function startSession(
   const arena: StoredArena = {
     id: sessionId,
     onChainId,
+    onChainIdV3,
     creator: userWalletAddress,
     entryFee: 0,
     prizePool: 0,
@@ -567,6 +672,7 @@ export async function startSession(
     totalTrades: 0,
     x402Payments: 0,
     x402TotalUsd: 0,
+    sealedOrderCount: 0,
     events: [],
     agentStates: new Map(),
     activeLoops: new Set(),

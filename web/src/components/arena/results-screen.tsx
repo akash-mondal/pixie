@@ -81,6 +81,12 @@ export function ResultsScreen({
           if (trade.swapTxHash) trail.push({ action: trade.realSwap ? 'realSwap' : 'swap', agent: entry.agentName, txHash: trade.swapTxHash, timestamp: trade.timestamp, detail: `${trade.direction?.toUpperCase()} ${trade.pair} [DEX]` });
         }
       }
+      // Sealed conviction orders
+      if (entry.sealedOrders && Array.isArray(entry.sealedOrders)) {
+        for (const order of entry.sealedOrders) {
+          if (order.submitTxHash) trail.push({ action: 'sealedOrder', agent: entry.agentName, txHash: order.submitTxHash, timestamp: order.timestamp || 0, detail: `${order.direction?.toUpperCase()} ${order.pair} [CTX]` });
+        }
+      }
     }
     return trail.sort((a, b) => a.timestamp - b.timestamp);
   }, [session, entries]);
@@ -89,6 +95,7 @@ export function ResultsScreen({
     creation: auditTrail.filter(t => t.action === 'createArena'),
     registration: auditTrail.filter(t => t.action === 'joinArena'),
     trades: auditTrail.filter(t => t.action === 'recordTrade'),
+    sealedOrders: auditTrail.filter(t => t.action === 'sealedOrder'),
     swaps: auditTrail.filter(t => t.action === 'realSwap' || t.action === 'swap'),
   }), [auditTrail]);
 
@@ -203,7 +210,7 @@ export function ResultsScreen({
       {/* ═══ SECTION 2: TECHNOLOGY PILLARS ═══ */}
       <motion.div {...sectionAnim(0.25)} className="grid grid-cols-4 gap-3 mb-8">
         {[
-          { color: '#eab308', title: 'BITE v2', subtitle: 'Threshold Encryption', stat: `${stats.biteOps ?? 0}`, unit: 'ops', detail: 'strategies encrypted at rest, decrypted on reveal', tx: session?.arenaCreationTxHash },
+          { color: '#eab308', title: 'BITE v2', subtitle: 'Threshold Encryption', stat: `${stats.biteOps ?? 0}`, unit: 'ops', detail: `strategies encrypted at rest${(stats.sealedOrderCount ?? 0) > 0 ? ` + ${stats.sealedOrderCount} sealed orders executed in CTX callback` : ', decrypted on reveal'}`, tx: session?.arenaCreationTxHash },
           { color: '#10b981', title: 'x402', subtitle: 'Agent Commerce', stat: `$${(stats.x402TotalUsd ?? 0).toFixed(2)}`, unit: 'settled', detail: `${stats.x402Payments ?? 0} micropayments via x402 protocol`, tx: firstX402Tx },
           { color: '#06b6d4', title: 'ERC-8004', subtitle: 'On-Chain Identity', stat: `${identityCount}`, unit: 'IDs', detail: 'sovereign agent identities on SKALE', tx: undefined },
           { color: '#8b5cf6', title: 'Algebra DEX', subtitle: 'Real Swaps', stat: `${realSwapCount}`, unit: 'swaps', detail: 'live Algebra Finance AMM on SKALE', tx: firstRealSwapTx },
@@ -324,7 +331,9 @@ export function ResultsScreen({
                   </div>
                 </div>
                 <div className="flex items-center gap-5">
-                  <span className="text-[14px] font-mono text-[#888]">{entry.tradeCount || 0} trades</span>
+                  <span className="text-[14px] font-mono text-[#888]">
+                    {entry.tradeCount || 0} trades{(entry.sealedOrderCount || 0) > 0 ? ` + ${entry.sealedOrderCount} sealed` : ''}
+                  </span>
                   {total > 0 && (
                     <div className="flex h-3 w-12 rounded overflow-hidden bg-[#111]" title={`${wins}W ${total - wins}L`}>
                       <div className="bg-green-500/60" style={{ width: `${(wins / total) * 100}%` }} />
@@ -474,6 +483,57 @@ export function ResultsScreen({
                                 </div>
                               ))}
                             </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 4b.5: Sealed Conviction Orders */}
+                      {entry.sealedOrders && entry.sealedOrders.length > 0 && !entry.sealedOrders[0]?.encrypted && (
+                        <div>
+                          <div className="font-mono text-[13px] text-[#555] tracking-[0.2em] uppercase mb-4">
+                            SEALED CONVICTION ORDERS ({entry.sealedOrders.length})
+                          </div>
+                          <div className="space-y-3">
+                            {entry.sealedOrders.map((order: any, i: number) => (
+                              <div key={i} className="rounded-xl border border-yellow-500/20 bg-yellow-500/[0.02] p-5">
+                                <div className="flex items-center justify-between mb-3">
+                                  <div className="flex items-center gap-3">
+                                    <span className="text-[11px] font-mono text-yellow-400 bg-yellow-500/10 px-2 py-0.5 rounded">CTX EXECUTED</span>
+                                    <span className={`text-[16px] font-mono font-medium ${
+                                      order.direction === 'buy' ? 'text-green-400' : 'text-red-400'
+                                    }`}>
+                                      {order.direction === 'buy' ? '\u2191 BUY' : '\u2193 SELL'}
+                                    </span>
+                                    <span className="text-[16px] font-mono text-[#ededed]">{order.pair}</span>
+                                  </div>
+                                  <span className="text-[14px] font-mono text-yellow-400">${order.amountIn?.toFixed(2)}</span>
+                                </div>
+
+                                {/* Encrypted → Decrypted flow */}
+                                <div className="mb-3">
+                                  <div className="text-[11px] font-mono text-yellow-500/50 mb-1">Encrypted at submission:</div>
+                                  <div className="text-[12px] font-mono text-yellow-500/30 break-all leading-relaxed">
+                                    {(order.encrypted || '').slice(0, 60)}...
+                                  </div>
+                                  <div className="text-[20px] text-[#333] text-center my-1">{'\u2193'}</div>
+                                  <div className="text-[11px] font-mono text-cyan-400/50 mb-1">Decrypted & executed in onDecrypt():</div>
+                                  <div className="text-[13px] font-mono text-[#ccc]">
+                                    {order.direction === 'buy' ? `${order.amountIn?.toFixed(2)} USDC \u2192 ${order.pair?.split('/')[0]}` : `${order.pair?.split('/')[0]} \u2192 USDC`}
+                                  </div>
+                                </div>
+
+                                {order.reasoning && (
+                                  <div className="text-[13px] font-mono text-[#999] leading-relaxed mb-2 italic">
+                                    &ldquo;{order.reasoning.length > 150 ? order.reasoning.slice(0, 150) + '...' : order.reasoning}&rdquo;
+                                  </div>
+                                )}
+
+                                <div className="flex items-center gap-3">
+                                  <ExplorerLink hash={order.submitTxHash} label="sealed tx" />
+                                  <span className="text-[11px] font-mono text-yellow-500/40">executed inside CTX callback</span>
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         </div>
                       )}
@@ -662,6 +722,15 @@ export function ResultsScreen({
                 <div className="text-[12px] font-mono text-[#555] tracking-[0.2em] uppercase pb-2 border-b border-[#1a1a1a] mb-2">Trade Records</div>
                 {auditGroups.trades.map((item, i) => (
                   <AuditRow key={i} item={item} badgeClass="text-[#888] bg-[#111]" />
+                ))}
+              </div>
+            )}
+            {/* Group: CTX Sealed Orders */}
+            {auditGroups.sealedOrders.length > 0 && (
+              <div>
+                <div className="text-[12px] font-mono text-[#555] tracking-[0.2em] uppercase pb-2 border-b border-[#1a1a1a] mb-2">CTX Executed Swaps</div>
+                {auditGroups.sealedOrders.map((item, i) => (
+                  <AuditRow key={i} item={item} badgeClass="text-yellow-400 bg-yellow-500/10" />
                 ))}
               </div>
             )}

@@ -45,6 +45,7 @@ export interface ArenaEntryInfo {
   joinTxHash: string;
   tradeCount: number;
   pnl: number;                   // basis points
+  sealedOrderCount: number;
   revealed: boolean;
 }
 
@@ -53,6 +54,7 @@ export interface ArenaEntryInfo {
 export interface StoredArena {
   id: string;                    // session ID = arena ID
   onChainId: number;             // PixieArena arenaId
+  onChainIdV3: number;           // PixieArenaV3 arenaId for sealed orders
   creator: string;
   entryFee: number;
   prizePool: number;
@@ -84,6 +86,7 @@ export interface StoredArena {
   totalTrades: number;
   x402Payments: number;
   x402TotalUsd: number;
+  sealedOrderCount: number;
 
   // Runtime
   events: TickEvent[];
@@ -143,6 +146,10 @@ class ArenaStore {
       if ((event.type as string) === 'x402-purchase' && event.data?.settled) {
         arena.x402Payments++;
         arena.x402TotalUsd += 0.01;
+      }
+      if ((event.type as string) === 'sealed-order') {
+        arena.sealedOrderCount++;
+        arena.biteOps += 1;
       }
     }
   }

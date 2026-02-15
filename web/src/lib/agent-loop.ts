@@ -5,10 +5,11 @@
 import { type Address } from 'viem';
 import { type AgentConfig, buildSystemPrompt } from './agent-builder';
 import { getMarketStateLive, type MarketState, TOKENS } from './algebra';
-import { encryptSwapTransaction, encryptPnL, encryptReasoning } from './trade-engine';
+import { encryptSwapTransaction, encryptPnL, encryptReasoning, encryptSealedOrder } from './trade-engine';
 import { writeServerContract, waitForTx, toBytes } from './server-wallet';
 import { writeAgentContract, waitForAgentTx } from './agent-wallet';
 import { PIXIE_ARENA_ABI, ARENA_ADDRESS } from './arena';
+import { ARENA_V3_ADDRESS, PIXIE_ARENA_V3_ABI } from './arena-v3';
 import { getArenaStore } from './arena-store';
 import { storeIntel, getAvailableIntel } from './agent-intel';
 import { purchaseRivalIntel, initAgentBudget } from './x402-agent';
@@ -39,6 +40,8 @@ export interface AgentArenaState {
   accentColor: string;       // UI color for this agent
   portfolio: Record<string, number>; // token → amount
   trades: TradeResult[];
+  sealedOrders: SealedOrderInfo[];
+  depositedUsdc: number;         // USDC deposited to V3 for sealed orders
   pnl: number; // running P&L in basis points
   totalTradesThisRound: number;
   stopped: boolean;
@@ -63,8 +66,18 @@ export interface TradeResult {
   realSwap?: boolean;     // true if real swap executed
 }
 
+export interface SealedOrderInfo {
+  pair: string;
+  direction: 'buy' | 'sell';
+  amountIn: number;
+  encrypted: string;
+  reasoning: string;
+  timestamp: number;
+  submitTxHash?: string;
+}
+
 export interface TickEvent {
-  type: 'analyzing' | 'decision' | 'encrypting' | 'executed' | 'hold' | 'stop' | 'error' | 'recording' | 'x402-purchase';
+  type: 'analyzing' | 'decision' | 'encrypting' | 'executed' | 'hold' | 'stop' | 'error' | 'recording' | 'x402-purchase' | 'sealed-order' | 'depositing';
   agentId: string;
   agentName: string;
   message: string;
@@ -73,7 +86,7 @@ export interface TickEvent {
 }
 
 export interface TradeDecision {
-  action: 'swap' | 'hold' | 'stop';
+  action: 'swap' | 'hold' | 'stop' | 'sealed_order';
   pair: string;
   direction: 'buy' | 'sell';
   amountPercent: number;
@@ -167,6 +180,24 @@ const AGENT_TOOLS = [
     },
   },
 ];
+
+const SEALED_ORDER_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'submit_sealed_order',
+    description: 'Submit a BITE-encrypted sealed conviction order. The swap will NOT execute now - it will execute inside the onDecrypt() CTX callback when the arena finalizes. Use this for your final conviction play. This ends your turn.',
+    parameters: {
+      type: 'object',
+      properties: {
+        pair: { type: 'string', description: 'Trading pair: ETH/USDC, WBTC/USDC, or ETH/WBTC' },
+        direction: { type: 'string', enum: ['buy', 'sell'], description: 'Buy or sell' },
+        amount_percent: { type: 'number', description: 'Percent of sealed order deposit to use (1-100)' },
+        reasoning: { type: 'string', description: 'Your conviction reasoning for this sealed order' },
+      },
+      required: ['pair', 'direction', 'amount_percent', 'reasoning'],
+    },
+  },
+};
 
 // --- Tool Execution ---
 
@@ -315,6 +346,17 @@ async function executeToolCall(
       };
     }
 
+    case 'submit_sealed_order': {
+      const pair = args.pair || 'ETH/USDC';
+      const direction = args.direction || 'buy';
+      const amountPercent = Math.min(100, Math.max(1, args.amount_percent || 50));
+      const reasoning = args.reasoning || 'sealed conviction play';
+      return {
+        result: JSON.stringify({ status: 'sealing', pair, direction, amountPercent, reasoning }),
+        terminal: { action: 'sealed_order', pair, direction, amountPercent, reasoning },
+      };
+    }
+
     default:
       return { result: `{"error": "unknown tool: ${toolName}"}` };
   }
@@ -326,6 +368,7 @@ async function callGroqAgent(
   systemPrompt: string,
   kickoff: string,
   ctx: ToolContext,
+  tools: typeof AGENT_TOOLS = AGENT_TOOLS,
 ): Promise<TradeDecision> {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error('GROQ_API_KEY not set');
@@ -342,7 +385,7 @@ async function callGroqAgent(
       const body = {
         model: 'openai/gpt-oss-120b',
         messages,
-        tools: AGENT_TOOLS,
+        tools,
       };
 
       let res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -462,8 +505,17 @@ export async function agentTick(
   const memorySection = memoryContext ? `\n\n${memoryContext}` : '';
   const fullPrompt = state.systemPrompt + memorySection;
 
+  // Check if final ticks — enable sealed order tool
+  const arenaData = getArenaStore().get(state.arenaId);
+  const isFinalTicks = arenaData && arenaData.deadline > 0 && Date.now() > arenaData.deadline - 2 * arenaData.tickInterval;
+  const tools = isFinalTicks ? [...AGENT_TOOLS, SEALED_ORDER_TOOL] : AGENT_TOOLS;
+
   // Kickoff message — agent decides what tools to call
-  const kickoff = `It is tick ${state.tickNumber + 1}. You have ${state.config.maxTradesPerRound - state.totalTradesThisRound} trades remaining this round. Your current P&L is ${(state.pnl / 100).toFixed(2)}%. Use your tools to analyze the market and make a decision. End your turn with place_trade or hold.`;
+  let kickoff = `It is tick ${state.tickNumber + 1}. You have ${state.config.maxTradesPerRound - state.totalTradesThisRound} trades remaining this round. Your current P&L is ${(state.pnl / 100).toFixed(2)}%. Use your tools to analyze the market and make a decision. End your turn with place_trade or hold.`;
+
+  if (isFinalTicks && state.depositedUsdc > 0) {
+    kickoff += ` FINAL TICKS: You have $${state.depositedUsdc.toFixed(2)} deposited for sealed conviction orders. Consider using submit_sealed_order for your final conviction play - the swap will execute inside the BITE CTX callback at reveal, invisible until then.`;
+  }
 
   // Tool context for executeToolCall
   const toolCtx: ToolContext = {
@@ -473,7 +525,7 @@ export async function agentTick(
   };
 
   // Call Groq agent with tool loop
-  const decision = await callGroqAgent(fullPrompt, kickoff, toolCtx);
+  const decision = await callGroqAgent(fullPrompt, kickoff, toolCtx, tools);
   console.log(`[agent-loop] ${state.agentName} decision:`, JSON.stringify(decision));
 
   if (decision.action === 'stop') {
@@ -505,6 +557,88 @@ export async function agentTick(
       timestamp: Date.now(),
     });
     return { ...state, tickNumber: state.tickNumber + 1 };
+  }
+
+  // Handle sealed conviction order
+  if (decision.action === 'sealed_order') {
+    emit({
+      type: 'decision',
+      agentId: state.agentId,
+      agentName: state.agentName,
+      message: `sealed conviction: ${decision.direction.toUpperCase()} ${decision.pair} (${decision.amountPercent}% of deposit)`,
+      data: { decision, sealed: true },
+      timestamp: Date.now(),
+    });
+
+    try {
+      const { tokenIn: tokenInAddr, tokenOut: tokenOutAddr } = resolveSwapTokens(decision.pair, decision.direction);
+      const spendUsdc = state.depositedUsdc * (decision.amountPercent / 100);
+      const amountIn = BigInt(Math.round(spendUsdc * 1e6));
+
+      if (amountIn === 0n) {
+        emit({ type: 'error', agentId: state.agentId, agentName: state.agentName, message: 'no deposit available for sealed order', timestamp: Date.now() });
+        return { ...state, tickNumber: state.tickNumber + 1 };
+      }
+
+      // BITE encrypt the sealed order
+      emit({
+        type: 'encrypting',
+        agentId: state.agentId,
+        agentName: state.agentName,
+        message: `bite.encryptMessage(abi.encode(tokenIn, tokenOut, amountIn)) - sealed conviction order`,
+        timestamp: Date.now(),
+      });
+
+      const encrypted = await encryptSealedOrder({ tokenIn: tokenInAddr, tokenOut: tokenOutAddr, amountIn });
+
+      // Submit to V3 on-chain
+      let submitTxHash: string | undefined;
+      const currentArena = getArenaStore().get(state.arenaId);
+      if (currentArena && currentArena.onChainIdV3 >= 0) {
+        try {
+          const txHash = await writeAgentContract(state.agentId, {
+            address: ARENA_V3_ADDRESS,
+            abi: PIXIE_ARENA_V3_ABI,
+            functionName: 'submitSealedOrder',
+            args: [BigInt(currentArena.onChainIdV3), BigInt(state.entryIndex), toBytes(encrypted)],
+            gas: 500000n,
+          });
+          await waitForAgentTx(txHash);
+          submitTxHash = txHash;
+        } catch (err: any) {
+          console.error(`[agent-loop] submitSealedOrder on-chain failed for ${state.agentName}:`, err.message);
+        }
+      }
+
+      const sealedOrder: SealedOrderInfo = {
+        pair: decision.pair,
+        direction: decision.direction,
+        amountIn: spendUsdc,
+        encrypted,
+        reasoning: decision.reasoning,
+        timestamp: Date.now(),
+        submitTxHash,
+      };
+
+      emit({
+        type: 'sealed-order' as any,
+        agentId: state.agentId,
+        agentName: state.agentName,
+        message: `sealed conviction: ${decision.direction.toUpperCase()} ${decision.pair} ($${spendUsdc.toFixed(2)}) - encrypted via BITE, executes at reveal`,
+        data: { decision, sealed: true, encrypted: encrypted.slice(0, 40), submitTxHash, amountIn: spendUsdc },
+        timestamp: Date.now(),
+      });
+
+      return {
+        ...state,
+        sealedOrders: [...state.sealedOrders, sealedOrder],
+        depositedUsdc: state.depositedUsdc - spendUsdc,
+        tickNumber: state.tickNumber + 1,
+      };
+    } catch (err: any) {
+      emit({ type: 'error', agentId: state.agentId, agentName: state.agentName, message: `sealed order failed: ${err.message}`, timestamp: Date.now() });
+      return { ...state, tickNumber: state.tickNumber + 1 };
+    }
   }
 
   // Execute swap
@@ -758,6 +892,8 @@ export function createAgentState(
     accentColor: AGENT_COLORS[colorIndex % AGENT_COLORS.length],
     portfolio: { USDC: initialUsdc },
     trades: [],
+    sealedOrders: [],
+    depositedUsdc: 0.10,
     pnl: 0,
     totalTradesThisRound: 0,
     stopped: false,

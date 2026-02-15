@@ -149,6 +149,7 @@ export async function GET(
                 swapTxHash: t.swapTxHash || undefined,
                 realSwap: t.realSwap || false,
               })) : undefined,
+              sealedOrderCount: state?.sealedOrders?.length || 0,
             };
           }),
         });
@@ -178,6 +179,16 @@ export async function GET(
                     swapTxHash: t.swapTxHash || undefined,
                     realSwap: t.realSwap || false,
                   })),
+                  sealedOrders: state?.sealedOrders?.map(s => ({
+                    pair: s.pair,
+                    direction: s.direction,
+                    amountIn: s.amountIn,
+                    encrypted: s.encrypted,
+                    reasoning: s.reasoning,
+                    timestamp: s.timestamp,
+                    submitTxHash: s.submitTxHash || undefined,
+                  })),
+                  sealedOrderCount: state?.sealedOrders?.length || 0,
                 };
               }),
           });

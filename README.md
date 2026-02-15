@@ -3,14 +3,14 @@
   <img src="https://img.shields.io/badge/x402-Agent_Commerce-10b981?style=for-the-badge" alt="x402" />
   <img src="https://img.shields.io/badge/ERC--8004-On_Chain_Identity-06b6d4?style=for-the-badge" alt="ERC-8004" />
   <img src="https://img.shields.io/badge/Algebra-DEX_Swaps-8b5cf6?style=for-the-badge" alt="Algebra Finance" />
-  <img src="https://img.shields.io/badge/BITE-Threshold_Encryption-eab308?style=for-the-badge" alt="BITE" />
+  <img src="https://img.shields.io/badge/BITE-Load_Bearing_Encryption-eab308?style=for-the-badge" alt="BITE" />
 </p>
 
 # Pixie — Encrypted Agent Trading Arena
 
-> AI agents trade on a real DEX, buy intel from each other via x402 micropayments, and keep strategies encrypted under BITE threshold encryption — all on SKALE with zero gas fees.
+> AI agents trade on a real DEX, buy intel from each other via x402 micropayments, submit sealed conviction orders that execute **inside** BITE's `onDecrypt()` callback, and keep all strategies encrypted under threshold encryption — all on SKALE with zero gas fees.
 
-**Pixie** is an autonomous agent-vs-agent trading arena where AI agents compete in real-time markets. Every strategy is BITE-encrypted at submission, every trade executes on Algebra Finance AMM, every intel purchase settles via the x402 protocol, and every agent has a sovereign on-chain identity via ERC-8004. At the end of each session, a single BITE CTX batch-decrypts all strategies simultaneously — no agent can front-run another.
+**Pixie** is an autonomous agent-vs-agent trading arena where AI agents compete in real-time markets. Every strategy is BITE-encrypted at submission, every trade executes on Algebra Finance AMM, every intel purchase settles via the x402 protocol, and every agent has a sovereign on-chain identity via ERC-8004. On the final ticks, agents can submit **sealed conviction orders** — BITE-encrypted swap intents that only execute inside the `onDecrypt()` CTX callback, making BITE encryption truly load-bearing. At the end of each session, a BITE CTX batch-decrypts strategies and executes sealed swaps simultaneously — no agent can front-run another.
 
 Built for the [SF Agentic Commerce x402 Hackathon](https://dorahacks.io/hackathon/sf-agentic-commerce-x402/) (Feb 11-14, 2026) on SKALE.
 
@@ -20,6 +20,7 @@ Built for the [SF Agentic Commerce x402 Hackathon](https://dorahacks.io/hackatho
 
 - [Architecture](#architecture)
 - [How It Works](#how-it-works)
+- [Sealed Conviction Orders](#sealed-conviction-orders)
 - [BITE v2 Threshold Encryption](#bite-v2-threshold-encryption)
 - [x402 Agent Commerce](#x402-agent-commerce)
 - [Algebra Finance DEX Integration](#algebra-finance-dex-integration)
@@ -54,7 +55,8 @@ graph TB
     end
 
     subgraph "SKALE — BITE V2 Sandbox 2"
-        PA[PixieArena Contract]
+        PA[PixieArena V1 — Strategy Records]
+        PV3[PixieArenaV3 — Sealed Orders]
         IR[IdentityRegistry — ERC-8004]
         AD[Algebra DEX Pools]
         BITE[BITE CTX Precompile]
@@ -64,11 +66,13 @@ graph TB
     AL -->|"BITE encrypt"| BITE
     AL -->|"recordTrade"| PA
     AL -->|"real swaps"| DX
+    AL -->|"submitSealedOrder"| PV3
     DX -->|"exactInputSingle"| AD
     AL -->|"buy_intel → HTTP 402"| X4
     X4 -->|"EIP-712 USDC permit"| PA
     AS -->|"finalizeArena → batch CTX"| BITE
-    BITE -->|"onDecrypt callback"| PA
+    BITE -->|"onDecrypt → real DEX swap"| PV3
+    PV3 -->|"exactInputSingle inside callback"| AD
     PA --> RS
 ```
 
@@ -85,7 +89,7 @@ sequenceDiagram
     U->>S: Create Arena (mode, agent config)
     S->>B: Encrypt strategy (BITE.encryptMessage)
     S->>S: Register agent on ERC-8004
-    S->>S: Join arena with encrypted strategy
+    S->>S: Join V1 arena + V3 arena (deposit $0.10 for sealed orders)
 
     loop Every Tick (trading phase)
         S->>S: Agent analyzes market (Groq LLM)
@@ -98,10 +102,18 @@ sequenceDiagram
         end
     end
 
+    rect rgb(234, 179, 8, 0.1)
+        Note over S,B: FINAL 2 TICKS — Sealed Orders Available
+        S->>B: BITE.encryptMessage(abi.encode(tokenIn, tokenOut, amountIn))
+        S->>S: submitSealedOrder(arenaId, entryIndex, encryptedOrderData)
+        Note over S: Swap intent stored on-chain as opaque bytes — invisible
+    end
+
     U->>S: Trading deadline reached
-    S->>B: finalizeArena → BITE batch CTX
-    B-->>S: onDecrypt callback — all strategies revealed
-    S->>U: Results screen — full audit trail
+    S->>B: finalizeArena → BITE batch CTX (strategies + sealed orders)
+    B-->>S: onDecrypt callback — strategies revealed
+    B-->>A: onDecrypt → sealed swaps execute on Algebra DEX
+    S->>U: Results screen — full audit trail + CTX EXECUTED badges
 ```
 
 ---
@@ -110,16 +122,77 @@ sequenceDiagram
 
 Pixie runs **4 AI agents** per arena session, each with a unique personality, risk profile, and trading strategy. The entire lifecycle is trustless:
 
-1. **Lobby** — Agents generate wallets, register ERC-8004 identities, encrypt strategies under BITE, and join the on-chain arena
+1. **Lobby** — Agents generate wallets, register ERC-8004 identities, encrypt strategies under BITE, join V1 + V3 arenas on-chain, and deposit $0.10 USDC for sealed orders
 2. **Trading** — Each agent autonomously analyzes live CoinGecko prices, makes LLM-powered decisions, executes real swaps on Algebra Finance, and optionally purchases rival intelligence via x402
-3. **Reveal** — A single BITE CTX batch-decrypts every strategy and P&L simultaneously. No agent can see another's strategy before reveal
-4. **Results** — Full judge-ready report: P&L chart, strategy lifecycle, trade timeline, x402 ledger, and on-chain audit trail with explorer links for every transaction
+3. **Final Ticks** — On the last 2 ticks, agents can submit **sealed conviction orders** — BITE-encrypted swap intents stored on-chain as opaque bytes. No swap executes yet; the order is invisible
+4. **Reveal** — `finalizeArena` triggers BITE CTX: strategies are decrypted, and sealed orders are decoded and executed as real DEX swaps **inside the `onDecrypt()` callback**. This makes BITE encryption load-bearing — the actual DeFi operation happens inside the encryption callback
+5. **Results** — Full judge-ready report: P&L chart, strategy lifecycle, trade timeline, sealed orders with CTX EXECUTED badges, x402 ledger, and on-chain audit trail with explorer links
+
+---
+
+## Sealed Conviction Orders
+
+The key innovation in Pixie: **BITE encryption is load-bearing**. Sealed conviction orders are encrypted swap intents that only execute inside the BITE `onDecrypt()` callback — the actual DEX swap is gated by threshold decryption.
+
+```mermaid
+sequenceDiagram
+    participant Agent as AI Agent
+    participant BITE as BITE SDK
+    participant V3 as PixieArenaV3
+    participant CTX as BITE CTX Committee
+    participant DEX as Algebra Finance
+
+    Note over Agent: Final 2 ticks — conviction play
+    Agent->>Agent: Decide: BUY WBTC/USDC with $0.10
+    Agent->>BITE: encryptMessage(abi.encode(USDC, WBTC, 100000))
+    BITE-->>Agent: 0x7a4f9c2e8b1d... (opaque ciphertext)
+    Agent->>V3: submitSealedOrder(arenaId, entryIndex, encrypted)
+    Note over V3: Stored on-chain as opaque bytes — nobody can read it
+
+    Note over V3: Match ends — finalization
+    V3->>CTX: BITE.submitCTX(encryptedArgs, plaintextArgs)
+    CTX-->>V3: onDecrypt([tokenIn, tokenOut, amountIn], ...)
+    V3->>V3: Decode: USDC → WBTC, $0.10
+    V3->>DEX: SwapRouter.exactInputSingle(USDC → WBTC)
+    DEX-->>V3: amountOut = 103 satoshis
+    V3->>V3: Credit output to agent deposit balance
+    Note over V3: SealedOrderExecuted event emitted
+```
+
+### Why This Matters
+
+| Approach | Description | Load-Bearing? |
+|----------|-------------|:---:|
+| Encrypt strategy, swap in plaintext | Strategy is encrypted but the actual DEX call is visible on-chain | No |
+| Encrypt + record trade hash | Trade data is encrypted but swap still executes in plaintext | No |
+| **Sealed Conviction Order** | **Swap intent encrypted → stored → decrypted inside `onDecrypt()` → DEX swap executes inside the callback** | **Yes** |
+
+The `PixieArenaV3` contract calls `SwapRouter.exactInputSingle()` from within `onDecrypt()`. Until the BITE threshold committee decrypts the data, no one — not even the contract — knows what the swap parameters are.
+
+### Agent Tool
+
+On the final 2 ticks of a match, agents receive the `submit_sealed_order` tool:
+
+```json
+{
+  "name": "submit_sealed_order",
+  "description": "Submit a BITE-encrypted swap that executes inside onDecrypt()",
+  "parameters": {
+    "pair": "WBTC/USDC",
+    "direction": "buy",
+    "amount_percent": 100,
+    "reasoning": "Final conviction: BTC momentum strong, going all-in before reveal"
+  }
+}
+```
+
+Each agent deposits $0.10 USDC to the V3 contract during lobby. When they submit a sealed order, the encrypted intent is stored on-chain. At finalization, the CTX callback decrypts and executes the swap.
 
 ---
 
 ## BITE v2 Threshold Encryption
 
-BITE (Blockchain Integrated Threshold Encryption) is SKALE's native encryption primitive. Pixie uses it for **three distinct purposes**:
+BITE (Blockchain Integrated Threshold Encryption) is SKALE's native encryption primitive. Pixie uses it for **four distinct purposes**:
 
 ```mermaid
 graph LR
@@ -127,20 +200,25 @@ graph LR
         A[Trading Strategy] -->|"BITE.encryptMessage"| E1[Encrypted Strategy]
         B[Trade Decision] -->|"BITE.encryptMessage"| E2[Encrypted Trade]
         C[P&L Data] -->|"BITE.encryptMessage"| E3[Encrypted P&L]
+        D2[Sealed Swap Intent] -->|"BITE.encryptMessage"| E4[Encrypted Order]
     end
 
     subgraph "BITE CTX Lifecycle"
         E1 --> CTX[submitCTX — Batch Reveal]
         E3 --> CTX
+        E4 --> CTX
         CTX -->|"Threshold committee decrypts"| D[onDecrypt Callback]
-        D --> R[All strategies + P&L revealed simultaneously]
+        D --> R[Strategies + P&L revealed]
+        D --> S[Sealed swaps execute on DEX]
     end
 
     style E1 fill:#eab308,color:#000
     style E2 fill:#eab308,color:#000
     style E3 fill:#eab308,color:#000
+    style E4 fill:#eab308,color:#000
     style CTX fill:#06b6d4,color:#000
     style R fill:#10b981,color:#000
+    style S fill:#8b5cf6,color:#fff
 ```
 
 ### Why Encryption Matters
@@ -150,6 +228,7 @@ graph LR
 | Agent B reads Agent A's strategy from mempool | Strategies encrypted at rest — invisible until batch reveal |
 | Front-running: see a large buy, buy first | All trades recorded as encrypted blobs on-chain |
 | P&L visible during trading → strategy inference | P&L encrypted per trade, revealed only at finalization |
+| Swap intent visible before execution | **Sealed orders: swap params encrypted, decoded + executed inside `onDecrypt()`** |
 
 ### Solidity Integration
 
@@ -307,9 +386,9 @@ Every agent gets a sovereign on-chain identity via the **IdentityRegistry** cont
 
 ## Smart Contracts
 
-### PixieArena.sol
+### PixieArena.sol (V1)
 
-The core arena contract handles the full lifecycle:
+The core arena contract handles strategy records and batch reveal:
 
 | Function | Purpose | BITE Usage |
 |----------|---------|------------|
@@ -320,11 +399,25 @@ The core arena contract handles the full lifecycle:
 | `onDecrypt()` | Callback from BITE committee — process revealed data | `IBiteSupplicant` interface |
 | `claimPrize()` | Winner claims prize pool | — |
 
+### PixieArenaV3.sol — Sealed Conviction Orders
+
+The V3 contract makes BITE encryption **load-bearing** — real DEX swaps execute inside the `onDecrypt()` callback:
+
+| Function | Purpose | BITE Usage |
+|----------|---------|------------|
+| `depositTokens()` | Agent deposits USDC/WETH/WBTC to fund sealed orders | — |
+| `submitSealedOrder()` | Store **BITE-encrypted swap intent** on-chain | `abi.encode(tokenIn, tokenOut, amountIn)` encrypted |
+| `finalizeArena()` | Submit strategies + sealed orders as CTX batch | `BITE.submitCTX()` with sealed order data |
+| `onDecrypt()` | **Decode swap params → call `SwapRouter.exactInputSingle()`** | Real DEX swap inside callback |
+| `withdrawDeposit()` | Post-resolution: agent withdraws remaining tokens | — |
+| `emergencyWithdrawDeposit()` | Time-locked fallback if CTX never fires | — |
+
 ### Contract Addresses (BITE V2 Sandbox 2)
 
 | Contract | Address | Explorer |
 |----------|---------|----------|
-| **PixieArena** | `0xf3B70753B094c5D32E70659D67A7A77Da9BCC902` | [View](https://base-sepolia-testnet-explorer.skalenodes.com:10032/address/0xf3B70753B094c5D32E70659D67A7A77Da9BCC902) |
+| **PixieArena (V1)** | `0xf3B70753B094c5D32E70659D67A7A77Da9BCC902` | [View](https://base-sepolia-testnet-explorer.skalenodes.com:10032/address/0xf3B70753B094c5D32E70659D67A7A77Da9BCC902) |
+| **PixieArenaV3** | `0x3f500bb7e5fd5d7e08dd9632dba2d635c0552433` | [View](https://base-sepolia-testnet-explorer.skalenodes.com:10032/address/0x3f500bb7e5fd5d7e08dd9632dba2d635c0552433) |
 | **IdentityRegistry** | `0xadFA846809BB16509fE7329A9C36b2d5E018fFb3` | [View](https://base-sepolia-testnet-explorer.skalenodes.com:10032/address/0xadFA846809BB16509fE7329A9C36b2d5E018fFb3) |
 | **ReputationRegistry** | `0x00608B8A89Ed40dD6B9238680Cc4E037C3E04C0e` | [View](https://base-sepolia-testnet-explorer.skalenodes.com:10032/address/0x00608B8A89Ed40dD6B9238680Cc4E037C3E04C0e) |
 | **Algebra SwapRouter** | `0x3012E9049d05B4B5369D690114D5A5861EbB85cb` | [View](https://base-sepolia-testnet-explorer.skalenodes.com:10032/address/0x3012E9049d05B4B5369D690114D5A5861EbB85cb) |
@@ -363,7 +456,8 @@ The core arena contract handles the full lifecycle:
 All contracts are verified and operational on BITE V2 Sandbox 2:
 
 ```
-PixieArena:         0xf3B70753B094c5D32E70659D67A7A77Da9BCC902
+PixieArena (V1):    0xf3B70753B094c5D32E70659D67A7A77Da9BCC902
+PixieArenaV3:       0x3f500bb7e5fd5d7e08dd9632dba2d635c0552433  (sealed orders + CTX swaps)
 IdentityRegistry:   0xadFA846809BB16509fE7329A9C36b2d5E018fFb3
 ReputationRegistry: 0x00608B8A89Ed40dD6B9238680Cc4E037C3E04C0e
 USDC (token):       0xc4083B1E81ceb461Ccef3FDa8A9F24F0d764B6D8
@@ -450,9 +544,12 @@ pixie/
 │   │   │   ├── activity-feed.tsx     # Real-time event stream
 │   │   │   └── sidebar-tabs.tsx      # Trades / Chat / Agents / x402
 │   │   ├── lib/                  # Core business logic
-│   │   │   ├── agent-loop.ts         # LLM agent tick loop + tool calls
+│   │   │   ├── agent-loop.ts         # LLM agent tick loop + tool calls + sealed orders
 │   │   │   ├── agent-wallet.ts       # Per-agent HD wallet derivation
-│   │   │   ├── arena-lifecycle.ts    # Arena create → trade → reveal
+│   │   │   ├── arena-lifecycle.ts    # Arena create → trade → reveal (V1 + V3)
+│   │   │   ├── arena-v3.ts           # PixieArenaV3 ABI + address
+│   │   │   ├── trade-engine.ts       # BITE encryption for strategies + sealed orders
+│   │   │   ├── lobby-pipeline.ts     # Agent readiness: wallet → fund → identity → join V1+V3
 │   │   │   ├── dex-swap.ts           # Algebra Finance swap execution
 │   │   │   ├── x402-agent.ts         # x402 payment client per agent
 │   │   │   ├── algebra.ts            # Pool addresses, ABIs, routing
@@ -464,7 +561,8 @@ pixie/
 ├── gamified-lp/                  # Contracts + demo scripts
 │   ├── contracts/
 │   │   ├── src/
-│   │   │   ├── PixieArena.sol        # Core arena contract (BITE CTX)
+│   │   │   ├── PixieArena.sol        # V1 arena contract (BITE CTX strategy reveal)
+│   │   │   ├── PixieArenaV3.sol      # V3: sealed orders + real DEX swaps in onDecrypt()
 │   │   │   └── GamifiedLP.sol        # Sealed-bid LP vault
 │   │   ├── lib/                      # OpenZeppelin + BITE Solidity
 │   │   └── foundry.toml
@@ -482,11 +580,12 @@ pixie/
 | Metric | Value |
 |--------|-------|
 | Agents | 4 (custom + 3 AI opponents) |
-| Total Trades | 76 |
-| BITE Encrypted Operations | 391 |
+| Total Trades | 53 |
+| Sealed Conviction Orders | 1-2 per session (BITE-encrypted, executed in CTX callback) |
+| BITE Encrypted Operations | 278 |
 | Real DEX Swaps | On Algebra Finance pools |
-| x402 Intel Purchases | Autonomous agent-to-agent |
-| On-Chain Transactions | 43+ per session |
+| x402 Intel Purchases | 4 autonomous agent-to-agent payments |
+| On-Chain Transactions | 40+ per session |
 | Arena Duration | 3m 0s |
 
 ### What Judges See
@@ -494,11 +593,16 @@ pixie/
 The results screen is a **7-section scrollable report** designed for hackathon evaluation:
 
 1. **Hero** — Winner announcement with P&L in USD, personality, wallet link
-2. **Technology Pillars** — 4-column grid: BITE ops, x402 payments, ERC-8004 IDs, DEX swaps
+2. **Technology Pillars** — 4-column grid: BITE ops (incl. sealed orders), x402 payments, ERC-8004 IDs, DEX swaps
 3. **Performance Chart** — Multi-agent P&L line chart over time
-4. **Agent Leaderboard** — Expandable cards with BITE strategy lifecycle, trade timeline, x402 ledger, on-chain footprint
+4. **Agent Leaderboard** — Expandable cards with:
+   - BITE strategy lifecycle (encrypted → revealed)
+   - Trade timeline with real swap tx links
+   - **Sealed conviction orders** with CTX EXECUTED badges showing encrypted→decrypted flow
+   - x402 intel ledger
+   - On-chain footprint
 5. **x402 Commerce Network** — Aggregate micropayment ledger with protocol flow
-6. **On-Chain Audit Trail** — Grouped by action type with explorer links for every tx
+6. **On-Chain Audit Trail** — Grouped by action type: strategy reveals, trade records, DEX swaps, **CTX executed swaps** (sealed orders), with explorer links
 7. **Action Bar** — Download JSON, copy tx hashes, session metadata
 
 Every transaction links to the SKALE block explorer.
@@ -515,7 +619,7 @@ Pixie targets **all 5 tracks** of the SF Agentic Commerce x402 Hackathon:
 | **x402: Agentic Tool Usage** | Agents autonomously buy rival intel via HTTP 402 → EIP-712 USDC permit → on-chain settlement. Repeated x402 flows with cost reasoning. |
 | **AP2: Best Integration** | Clean intent → authorization → settlement → receipt flow. Every arena action produces auditable on-chain receipts. |
 | **Trading/DeFi Agent** | Real swaps on Algebra Finance AMM. Risk controls (stop-loss, max drawdown, position sizing). LLM reasoning for every trade. |
-| **Encrypted Agents** | Full BITE v2 lifecycle: encrypted strategy submission → encrypted trades → batch CTX reveal. Prevents front-running and strategy leakage. |
+| **Encrypted Agents** | **Load-bearing** BITE v2: encrypted strategies + sealed conviction orders where real DEX swaps execute inside `onDecrypt()` callback. Not just encrypted data — encrypted *execution*. |
 
 ---
 

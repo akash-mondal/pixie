@@ -63,6 +63,7 @@ export async function POST(req: NextRequest) {
       joinTxHash: txHash,
       tradeCount: 0,
       pnl: 0,
+      sealedOrderCount: 0,
       revealed: false,
     });
 

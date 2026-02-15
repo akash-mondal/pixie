@@ -50,6 +50,7 @@ export async function POST(req: NextRequest) {
     getArenaStore().add({
       id: String(arenaId),
       onChainId: arenaId,
+      onChainIdV3: -1,
       creator: creator || 'server',
       entryFee,
       prizePool,
@@ -74,6 +75,7 @@ export async function POST(req: NextRequest) {
       totalTrades: 0,
       x402Payments: 0,
       x402TotalUsd: 0,
+      sealedOrderCount: 0,
       events: [],
       agentStates: new Map(),
       activeLoops: new Set(),

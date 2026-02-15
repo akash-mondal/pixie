@@ -89,6 +89,21 @@ export async function GET(
             encryptedReasoning: isRevealPhase ? t.encryptedReasoning : undefined,
           }))
         : undefined,
+      // Sealed conviction orders (visible after reveal)
+      sealedOrders: isRevealPhase
+        ? state?.sealedOrders?.map(s => ({
+            pair: s.pair,
+            direction: s.direction,
+            amountIn: s.amountIn,
+            encrypted: s.encrypted,
+            reasoning: s.reasoning,
+            timestamp: s.timestamp,
+            submitTxHash: s.submitTxHash || undefined,
+          }))
+        : (state?.sealedOrders?.length || 0) > 0
+          ? [{ count: state?.sealedOrders?.length, encrypted: true }]
+          : undefined,
+      sealedOrderCount: state?.sealedOrders?.length || 0,
     };
   });
 
@@ -113,6 +128,7 @@ export async function GET(
       totalTrades: arena.totalTrades,
       x402Payments: arena.x402Payments,
       x402TotalUsd: arena.x402TotalUsd,
+      sealedOrderCount: arena.sealedOrderCount,
     },
     // Arena-level on-chain data
     arenaCreationTxHash: arena.txHash || undefined,

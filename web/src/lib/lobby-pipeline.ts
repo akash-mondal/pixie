@@ -11,6 +11,7 @@ import { serializeConfig } from './agent-builder';
 import { initMemory } from './agent-memory';
 import { approveForSwap, approveTokenTo } from './dex-swap';
 import { USDC_ADDRESS } from './algebra';
+import { ARENA_V3_ADDRESS, PIXIE_ARENA_V3_ABI } from './arena-v3';
 
 type EmitFn = (event: TickEvent) => void;
 
@@ -131,6 +132,43 @@ async function processOpponentAgent(
     }
   }
 
+  // Step 6.5: Join V3 arena + deposit $0.10 for sealed orders
+  if (arena.onChainIdV3 >= 0) {
+    try {
+      const { writeAgentContract, waitForAgentTx } = await import('./agent-wallet');
+      const { toBytes } = await import('./server-wallet');
+
+      // Join V3 arena
+      emitStep(emit, agent, 'join', 'joining sealed order vault (V3)...');
+      const v3JoinHash = await writeAgentContract(agentId, {
+        address: ARENA_V3_ADDRESS,
+        abi: PIXIE_ARENA_V3_ABI,
+        functionName: 'joinArena',
+        args: [BigInt(arena.onChainIdV3), BigInt(agent.entryIndex), toBytes(encryptedConfig)],
+        gas: 2000000n,
+      });
+      await waitForAgentTx(v3JoinHash);
+
+      // Approve USDC to V3
+      await approveTokenTo(agentId, USDC_ADDRESS, ARENA_V3_ADDRESS);
+
+      // Deposit $0.10 USDC for sealed orders
+      const depositAmount = 100000n; // 0.10 USDC (6 decimals)
+      emitStep(emit, agent, 'usdc', 'depositing $0.10 to sealed order vault...');
+      const depositHash = await writeAgentContract(agentId, {
+        address: ARENA_V3_ADDRESS,
+        abi: PIXIE_ARENA_V3_ABI,
+        functionName: 'depositTokens',
+        args: [BigInt(arena.onChainIdV3), BigInt(agent.entryIndex), USDC_ADDRESS, depositAmount],
+        gas: 500000n,
+      });
+      await waitForAgentTx(depositHash);
+      emitStep(emit, agent, 'usdc', 'deposited $0.10 to sealed order vault', depositHash);
+    } catch (err: any) {
+      console.error(`[lobby-pipeline] ${agent.agentName} V3 join/deposit failed:`, err.message);
+    }
+  }
+
   // Step 7: Ready!
   store.updateLobbyStep(arena.id, agentId, 'ready');
   emitStep(emit, agent, 'ready', 'READY');
@@ -145,6 +183,7 @@ async function processOpponentAgent(
     joinTxHash: joinHash,
     tradeCount: 0,
     pnl: 0,
+    sealedOrderCount: 0,
     revealed: false,
   });
 }
@@ -208,6 +247,37 @@ async function processUserAgent(
     }
   }
 
+  // Join V3 arena + deposit for sealed orders
+  if (arena.onChainIdV3 >= 0) {
+    try {
+      const { writeAgentContract: writeAgent, waitForAgentTx: waitAgent } = await import('./agent-wallet');
+      const { toBytes: toB } = await import('./server-wallet');
+
+      const v3JoinHash = await writeAgent(agentId, {
+        address: ARENA_V3_ADDRESS,
+        abi: PIXIE_ARENA_V3_ABI,
+        functionName: 'joinArena',
+        args: [BigInt(arena.onChainIdV3), BigInt(agent.entryIndex), toB(encryptedConfig)],
+        gas: 2000000n,
+      });
+      await waitAgent(v3JoinHash);
+
+      await approveTokenTo(agentId, USDC_ADDRESS, ARENA_V3_ADDRESS).catch(() => {});
+
+      const depositAmount = 100000n;
+      const depositHash = await writeAgent(agentId, {
+        address: ARENA_V3_ADDRESS,
+        abi: PIXIE_ARENA_V3_ABI,
+        functionName: 'depositTokens',
+        args: [BigInt(arena.onChainIdV3), BigInt(agent.entryIndex), USDC_ADDRESS, depositAmount],
+        gas: 500000n,
+      });
+      await waitAgent(depositHash);
+    } catch (err: any) {
+      console.error(`[lobby-pipeline] ${agent.agentName} (user) V3 join/deposit failed:`, err.message);
+    }
+  }
+
   // Ready!
   store.updateLobbyStep(arena.id, agentId, 'ready');
   emitStep(emit, agent, 'ready', 'READY');
@@ -221,6 +291,7 @@ async function processUserAgent(
     joinTxHash: joinHash,
     tradeCount: 0,
     pnl: 0,
+    sealedOrderCount: 0,
     revealed: false,
   });
 }

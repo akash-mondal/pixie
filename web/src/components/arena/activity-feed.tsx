@@ -21,6 +21,8 @@ const EVENT_ICONS: Record<string, string> = {
   error: '\u2717',      // x
   recording: '\u25CF',  // filled circle
   'x402-purchase': '$',
+  'sealed-order': '\u25C6', // filled diamond — sealed conviction order
+  'depositing': '\u2193',   // down arrow — token deposit
 };
 
 // Drip-feed hook: takes raw events and reveals them one-by-one with a delay
@@ -110,8 +112,9 @@ export function ActivityFeed({ events, lobbyAgents, userAgentId }: ActivityFeedP
         const isSystem = evt.agentId === 'system';
         const isOwned = evt.agentId === userAgentId;
         const color = isSystem ? '#eab308' : getAgentColor(evt.agentId);
-        const swapTxHash = (evt.data as any)?.swapTxHash;
+        const swapTxHash = (evt.data as any)?.swapTxHash || (evt.data as any)?.submitTxHash;
         const isMarketMover = isSystem && (evt.data as any)?.marketMover;
+        const isSealedOrder = evt.type === 'sealed-order';
 
         return (
           <motion.div
@@ -120,7 +123,8 @@ export function ActivityFeed({ events, lobbyAgents, userAgentId }: ActivityFeedP
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.2, ease: 'easeOut' }}
             className={`flex items-start gap-2.5 py-1.5 text-[12px] font-mono leading-tight ${
-              isMarketMover ? 'bg-yellow-500/[0.03] -mx-3 px-3 rounded' : ''
+              isMarketMover ? 'bg-yellow-500/[0.03] -mx-3 px-3 rounded' :
+              isSealedOrder ? 'bg-yellow-500/[0.04] -mx-3 px-3 rounded border-l-2 border-l-yellow-500/30' : ''
             }`}
           >
             {/* Timestamp */}
@@ -145,6 +149,8 @@ export function ActivityFeed({ events, lobbyAgents, userAgentId }: ActivityFeedP
               evt.type === 'executed' ? 'text-green-400/70' :
               evt.type === 'error' ? 'text-red-400/70' :
               evt.type === 'x402-purchase' ? 'text-emerald-400/70' :
+              evt.type === 'sealed-order' ? 'text-yellow-400' :
+              evt.type === 'depositing' ? 'text-cyan-400/70' :
               'text-[#555]'
             }`}>
               {EVENT_ICONS[evt.type] || '\u00B7'}

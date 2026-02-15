@@ -14,6 +14,7 @@ interface TradeListProps {
 export function TradeList({ entries, events, userAgentId, isReveal, lobbyAgents }: TradeListProps) {
   // Collect trades from events (executed events have trade data)
   const executedEvents = events.filter(e => e.type === 'executed');
+  const sealedEvents = events.filter(e => e.type === 'sealed-order');
 
   // Also collect from entries.trades (for reveal phase)
   const allTrades: {
@@ -26,6 +27,8 @@ export function TradeList({ entries, events, userAgentId, isReveal, lobbyAgents 
     recordTxHash?: string;
     swapTxHash?: string;
     realSwap?: boolean;
+    sealed?: boolean;
+    sealedEncrypted?: string;
     reasoning?: string;
     timestamp: number;
     isOwned: boolean;
@@ -78,6 +81,27 @@ export function TradeList({ entries, events, userAgentId, isReveal, lobbyAgents 
         isOwned,
       });
     }
+    // Add sealed orders from events
+    for (const evt of sealedEvents) {
+      const isOwned = evt.agentId === userAgentId;
+      const lobby = lobbyAgents.find((a: any) => a.agentId === evt.agentId);
+      const color = lobby?.accentColor || '#888';
+      const data = evt.data as any;
+      allTrades.push({
+        agentId: evt.agentId,
+        agentName: evt.agentName,
+        color,
+        direction: data?.decision?.direction || 'buy',
+        pair: data?.decision?.pair || 'ETH/USDC',
+        pnlBps: 0,
+        swapTxHash: data?.submitTxHash,
+        sealed: true,
+        sealedEncrypted: data?.encrypted,
+        reasoning: isOwned ? data?.decision?.reasoning : undefined,
+        timestamp: evt.timestamp,
+        isOwned,
+      });
+    }
     allTrades.sort((a, b) => b.timestamp - a.timestamp);
   }
 
@@ -92,7 +116,9 @@ export function TradeList({ entries, events, userAgentId, isReveal, lobbyAgents 
   return (
     <div className="divide-y divide-[#1a1a1a]">
       {allTrades.map((trade, i) => (
-        <div key={`${trade.agentId}-${trade.timestamp}-${i}`} className="px-3 py-3 hover:bg-[#0d0d0d] transition-colors">
+        <div key={`${trade.agentId}-${trade.timestamp}-${i}`} className={`px-3 py-3 hover:bg-[#0d0d0d] transition-colors ${
+          trade.sealed ? 'border-l-2 border-l-yellow-500/30 bg-yellow-500/[0.02]' : ''
+        }`}>
           {/* Row 1: Agent + Direction + Pair + P&L */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
@@ -100,13 +126,19 @@ export function TradeList({ entries, events, userAgentId, isReveal, lobbyAgents 
               <span className={`text-[13px] font-mono font-medium ${trade.isOwned ? 'text-cyan-400' : 'text-[#ccc]'}`}>
                 {trade.agentName}
               </span>
-              <DirectionArrow direction={trade.direction} />
+              {trade.sealed ? (
+                <span className="text-[10px] font-mono text-yellow-400 bg-yellow-500/10 px-1.5 py-0.5 rounded">SEALED</span>
+              ) : (
+                <DirectionArrow direction={trade.direction} />
+              )}
               <span className="text-[13px] font-mono text-[#ededed]">
                 {trade.pair}
               </span>
             </div>
             <div className="flex items-center gap-2.5">
-              {trade.isOwned || isReveal ? (
+              {trade.sealed ? (
+                <span className="text-[11px] font-mono text-yellow-500/70">executes at reveal</span>
+              ) : trade.isOwned || isReveal ? (
                 <span className={`text-[13px] font-mono font-medium ${
                   trade.pnlBps > 0 ? 'text-green-400' : trade.pnlBps < 0 ? 'text-red-400' : 'text-[#888]'
                 }`}>
@@ -115,22 +147,22 @@ export function TradeList({ entries, events, userAgentId, isReveal, lobbyAgents 
               ) : (
                 <LockIcon size={10} />
               )}
-              {trade.realSwap && (
+              {trade.realSwap && !trade.sealed && (
                 <span className="text-[10px] font-mono text-green-500/70 bg-green-500/10 px-1.5 py-0.5 rounded">REAL</span>
               )}
             </div>
           </div>
 
-          {/* Row 2: Reasoning + TX links */}
+          {/* Row 2: Reasoning/encrypted + TX links */}
           <div className="flex items-center justify-between mt-1.5">
-            <span className="text-[11px] font-mono text-[#777] truncate flex-1 mr-2">
-              {trade.isOwned || isReveal
-                ? (trade.reasoning?.slice(0, 100) || '')
-                : ''
+            <span className={`text-[11px] font-mono truncate flex-1 mr-2 ${trade.sealed ? 'text-yellow-500/50' : 'text-[#777]'}`}>
+              {trade.sealed && trade.sealedEncrypted
+                ? trade.sealedEncrypted.slice(0, 40) + '...'
+                : (trade.isOwned || isReveal ? (trade.reasoning?.slice(0, 100) || '') : '')
               }
             </span>
             <div className="flex items-center gap-2.5 shrink-0">
-              {trade.swapTxHash && <ExplorerLink hash={trade.swapTxHash} label="swap" />}
+              {trade.swapTxHash && <ExplorerLink hash={trade.swapTxHash} label={trade.sealed ? 'sealed' : 'swap'} />}
               <span className="text-[10px] font-mono text-[#555]">{relativeTime(trade.timestamp)}</span>
             </div>
           </div>

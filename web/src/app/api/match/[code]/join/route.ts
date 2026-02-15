@@ -72,6 +72,7 @@ export async function POST(
       joinTxHash: txHash,
       tradeCount: 0,
       pnl: 0,
+      sealedOrderCount: 0,
       revealed: false,
     });
 
