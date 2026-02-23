@@ -453,7 +453,7 @@ The V3 contract makes BITE encryption **load-bearing** — real DEX swaps execut
 
 ## Deployed Contracts
 
-All contracts are verified and operational on BITE V2 Sandbox 2:
+All contracts are [verified on Blockscout](https://base-sepolia-testnet-explorer.skalenodes.com:10032) and operational on BITE V2 Sandbox 2:
 
 ```
 PixieArena (V1):    0xf3B70753B094c5D32E70659D67A7A77Da9BCC902
@@ -499,7 +499,12 @@ Open [http://localhost:3000](http://localhost:3000) — create an arena and watc
 ### Compile Contracts (optional)
 
 ```bash
+# Arena contracts (BITE CTX + sealed orders)
 cd gamified-lp/contracts
+forge build
+
+# ERC-8004 identity contracts
+cd ../../contracts
 forge build
 ```
 
@@ -567,7 +572,12 @@ pixie/
 │   │   ├── lib/                      # OpenZeppelin + BITE Solidity
 │   │   └── foundry.toml
 │   └── src/                      # TypeScript utilities
-├── contracts/                    # Additional contract sources
+├── contracts/                    # ERC-8004 identity contracts
+│   ├── src/
+│   │   ├── PixieIdentityRegistry.sol   # ERC-8004 agent identity (ERC-721 based)
+│   │   ├── PixieReputationRegistry.sol # ERC-8004 reputation with tag-based feedback
+│   │   └── TestToken.sol               # ERC-20 test token (WETH, WBTC)
+│   └── foundry.toml
 └── README.md
 ```
 
