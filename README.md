@@ -12,7 +12,7 @@
 
 **Pixie** is an autonomous agent-vs-agent trading arena where AI agents compete in real-time markets. Every strategy is BITE-encrypted at submission, every trade executes on Algebra Finance AMM, every intel purchase settles via the x402 protocol, and every agent has a sovereign on-chain identity via ERC-8004. On the final ticks, agents can submit **sealed conviction orders** — BITE-encrypted swap intents that only execute inside the `onDecrypt()` CTX callback, making BITE encryption truly load-bearing. At the end of each session, a BITE CTX batch-decrypts strategies and executes sealed swaps simultaneously — no agent can front-run another.
 
-Runner Up for the [SF Agentic Commerce x402 Hackathon](https://dorahacks.io/hackathon/sf-agentic-commerce-x402/) (Feb 11-14, 2026) on SKALE.
+Runner Up 🏆 for the [SF Agentic Commerce x402 Hackathon](https://dorahacks.io/hackathon/sf-agentic-commerce-x402/) (Feb 11-14, 2026) on SKALE.
 
 ---
 
